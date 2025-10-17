@@ -1,0 +1,163 @@
+
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <Wire.h>
+#include <BH1750.h>
+#include <ArduinoJson.h>
+#include "DHT.h"
+
+// ==== WiFi + MQTT ====
+const char* ssid = "sufjan stevens";                  // tên wifi
+const char* password = "sufjanstevens";              // password
+const char* mqtt_server = "10.23.200.4";              // local broker trên máy 
+const int mqtt_port = 1883;
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+// DHT11
+#define DHTPIN 19                     // GPIO4 = D4
+#define DHTTYPE DHT22
+DHT dht(DHTPIN, DHTTYPE);
+
+// BH1750
+BH1750 lightMeter;
+
+// LED devices
+#define LED_PIN   2
+#define AC_PIN    5
+#define FAN_PIN   18
+
+void setup_wifi() {
+  delay(10);
+  Serial.println("Connecting to WiFi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connected, IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+
+// Callback xử lý tin nhắn MQTT
+void callback(char* topic, byte* payload, unsigned int length) {
+  // Chuyển payload sang chuỗi
+  String msg;
+  for (int i = 0; i < length; i++) {
+    msg += (char)payload[i];
+  }
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  Serial.println(msg);
+
+  // Parse JSON 
+  StaticJsonDocument<200> doc;
+  deserializeJson(doc, msg);
+
+  // nếu json có key led
+  if (doc.containsKey("led")) {
+    int ledState = doc["led"];
+    digitalWrite(LED_PIN, ledState ? HIGH : LOW);
+    Serial.print("LED set to: ");
+    Serial.println(ledState);
+  }
+
+  // nếu json có key "ac"
+  if (doc.containsKey("ac")) {
+    int acState = doc["ac"];
+    digitalWrite(AC_PIN, acState ? HIGH : LOW);
+    Serial.print("AC set to: ");
+    Serial.println(acState);
+  }
+
+  // nếu json có key "fan"
+  if (doc.containsKey("fan")) {
+    int fanState = doc["fan"];
+    digitalWrite(FAN_PIN, fanState ? HIGH : LOW);
+    Serial.print("Fan set to: ");
+    Serial.println(fanState);
+  }
+}
+
+
+// Reconnect MQTT 
+void reconnect() {
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Kết nối với user/pass
+    if (client.connect("ESP32Client", "user1", "123")) {
+      Serial.println("connected");
+      client.subscribe("esp32/control");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
+}
+
+
+// ==== Setup ====
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(AC_PIN, OUTPUT);
+  pinMode(FAN_PIN, OUTPUT);
+
+  digitalWrite(LED_PIN, LOW);
+  digitalWrite(AC_PIN, LOW);
+  digitalWrite(FAN_PIN, LOW);
+  
+  setup_wifi();
+
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
+
+  dht.begin();
+  Wire.begin(21, 22);  // SDA=21, SCL=22
+  lightMeter.begin();
+
+}
+
+
+// ==== Loop ====
+void loop() {
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
+  // Đọc dữ liệu cảm biến
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+  float lux = lightMeter.readLightLevel();
+
+  // Gửi MQTT mỗi 2s
+  static unsigned long lastMsg = 0;   // lưu thời điểm cuối gửi dữ liệu
+  if (millis() - lastMsg > 2000) {    // nếu đã qua 2 giây
+    lastMsg = millis();
+
+    // Tạo message theo định dạng JSON
+    char msg[128];
+    snprintf(msg, sizeof(msg),
+            "{"
+              "\"temp\": %.1f,"
+              "\"hum\": %.1f,"
+              "\"lux\": %.1f"
+            "}",
+            t, h, lux);
+
+    // In ra Serial để debug
+    Serial.print("Publish: ");
+    Serial.println(msg);
+
+    // Gửi message lên MQTT
+    client.publish("esp32/sensors", msg);
+  }
+}
+
