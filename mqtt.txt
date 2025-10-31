@@ -1,0 +1,9 @@
+# TOPIC SENSOR
+mosquitto_sub -h 10.173.129.4 -p 1883 -t "esp32/sensors" -v
+mosquitto_pub -h 10.173.129.4 -p 1883 -t "esp32/sensors" -u "user1" -P "123" -m "{\"temp\":0,\"hum\":2,\"lux\":300.4}"
+
+# TOPIC CONTROL
+SUB: mosquitto_sub -h 10.173.129.4 -p 1883 -t "esp32/sensors" -v
+PUB: mosquitto_pub -h 10.173.129.4 -p 1883 -t "esp32/control" -u "user1" -P "123" -m "{\"led\":0,\"ac\":0,\"fan\":0}"
+mosquitto_pub -h 10.173.129.4 -p 1883 -t "esp32/control" -u "user1" -P "123" -m "{\"led\":0,\"ac\":0,\"fan\":0}"
+mosquitto_pub -h 10.173.129.4 -p 1883 -t "esp32/control" -u "user1" -P "123" -m "{\"led\":1,\"ac\":1,\"fan\":0}"
